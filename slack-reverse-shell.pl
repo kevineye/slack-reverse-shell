@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 
-my $token = shift;; # see https://api.slack.com/web#authentication to generate a token
+my $token = shift; # see https://api.slack.com/web#authentication to generate a token
 my $group = lookup_group($token, shift);
 
 die <<USAGE unless $token and $group;
@@ -10,6 +10,7 @@ See https://api.slack.com/web#authentication to generate a token.
 USAGE
 
 my $host = `hostname`;
+chomp $host;
 $host =~ s{\..*}{};
 my $oldest = time;
 
@@ -22,8 +23,9 @@ while(1) {
     die $res unless $data->{ok};
     for my $message (@{$data->{messages}}) {
         $oldest = $message->{ts};
-        if ($message->{type} eq "message" and !$message->{subtype}) {
+        if ($message->{type} eq "message" and !$message->{subtype} and $message->{text} =~ m{^\s*\Q$host\E\s+}i) {
             my $cmd = $message->{text};
+            $cmd =~ s{^\s*\Q$host\E\s+}{}i;
             $cmd =~ s{\N{U+2018}|\N{U+2019}}{'}g; # slack client automatically curls quotes; undo that
             $cmd =~ s{\N{U+201C}|\N{U+201D}}{"}g; # slack client automatically curls quotes; undo that
             $cmd =~ s{\N{U+2014}}{--}g; # slack client automatically converts -- to em dash; undo that
@@ -31,7 +33,7 @@ while(1) {
             $cmd =~ s{&lt;}{<}g; # unescape standard chars
             $cmd =~ s{&gt;}{>}g; # unescape standard chars
             $cmd =~ s{&amp;}{&}g; # unescape standard chars
-            bye() if $cmd =~ m{^\s*(exit|bye|quit|die)\s*$}i; # say any of these things to kill the shell
+            bye() if $cmd =~ m{^\s*(exit|bye|quit|die|disconnect)\s*$}i; # say any of these things to kill the shell
             my $out = qx{$cmd 2>&1}; # run, redirecting stderr to stdout
             system 'curl', '-fSs', '-o', '/dev/null', '-F', 'parse=none', '-F', "username=$host", '-F', "token=$token", '-F', "channel=$group", '-F', "text=$cmd", '-F', 'attachments='.encode_json([{text => $out, color => ${^CHILD_ERROR_NATIVE} ? 'danger' : 'good'}]), 'https://slack.com/api/chat.postMessage' and die $!;
         }
